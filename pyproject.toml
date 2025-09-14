@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "journalview"                       # unique name on PyPI
-version = "0.1.7"
+version = "0.1.8"
 description = "Python package to monitor and profile linux journal boot sequence"
 readme = "README.md"
 authors = [{ name="FroykeFroyke", email="froykefroyke@gmail.com" }]

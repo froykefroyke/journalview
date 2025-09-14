@@ -28,11 +28,11 @@ def view(service: Tuple[str, ...], boot: Optional[str], summary: bool) -> None:
     jt.view()
 
 def main():
-    cli()
-
-if __name__ == '__main__':
     if len(sys.argv) == 1:
         # if no arguments are provided, default to tui
         sys.argv.append('tui')
         os.environ['TERM'] = 'xterm-256color'  # Ensure terminal supports colors
-        main()
+    cli()
+
+if __name__ == '__main__':
+    main()
