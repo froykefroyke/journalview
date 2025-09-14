@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "journalview"                       # unique name on PyPI
+version = "0.1.7"
+description = "Python package to monitor and profile linux journal boot sequence"
+readme = "README.md"
+authors = [{ name="FroykeFroyke", email="froykefroyke@gmail.com" }]
+license = {text = "MIT"}
+dependencies = [
+    "rich",
+    "trogon",
+    "click"
+]
+requires-python = ">=3.9"
+
+[project.urls]
+Homepage = "https://github.com/frayshai/journalview"
+
+[project.scripts]
+journal-cli = "journalview.cli:main"
