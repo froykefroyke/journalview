@@ -8,16 +8,32 @@ from datetime import datetime, timedelta
 from rich.table import Table
 from rich.console import Console
 from rich.text import Text
+from enum import IntEnum
 
+class Priority(IntEnum):
+	"""Standard syslog/journal priorities (numeric values)."""
+	EMERG = 0
+	PANIC = 0    # alias
+	ALERT = 1
+	CRITICAL = 2
+	CRIT = 2     # alias
+	ERROR = 3
+	ERR = 3      # alias
+	WARNING = 4
+	WARN = 4     # alias
+	NOTICE = 5
+	INFO = 6
+	DEBUG = 7
 
 class JournalCtl:
 
-    def __init__(self, boot: Optional[str], services: Tuple[str, ...], summary: bool = False) -> None:
+    def __init__(self, boot: Optional[str], services: Tuple[str, ...], summary: bool = False, priority: Optional[str] = None) -> None:
         """Initialize JournalCtl for a specific boot and set of services."""
         self.boot: str = boot if boot is not None else '0'
         self.services: Tuple[str, ...] = services
         self.journal_dict: Dict[str, Any] = {}
         self.summary: bool = summary
+        self.priority: Optional[str] = priority
 
     @staticmethod
     def get_available_boots() -> int:
@@ -171,21 +187,26 @@ class JournalCtl:
     
         return msg_clean.strip()
 
-    def collect_data(self, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process raw journal entries and return a list of structured row dicts.
+    def collect_data(self, entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Process raw journal entries and return a dict with rows and per-service timestamps.
 
-        Each row dict contains raw datetimes and timedelta values so callers can
-        format or serialize as needed.
+        Returns:
+            {
+                'rows': List[Dict[str, Any]],
+                'service_first': Dict[str, datetime],
+                'service_last': Dict[str, datetime]
+            }
         """
         rows: List[Dict[str, Any]] = []
         prev_ts: Optional[datetime] = None
         boot_start_ts: Optional[datetime] = None
         service_start: Dict[str, datetime] = {}
+        service_first: Dict[str, datetime] = {}
+        service_last: Dict[str, datetime] = {}
         reached_last_boot_log: bool = False
-        priority_map = {
-            '0': 'EMERGENCY', '1': 'ALERT', '2': 'CRITICAL', '3': 'ERROR',
-            '4': 'WARNING', '5': 'NOTICE', '6': 'INFO', '7': 'DEBUG'
-        }
+        # priority handling uses Priority enum; numeric journal PRIORITY fields
+        # will be mapped to enum names when in 0..7 range. Values outside
+        # that range or non-numeric values are compared as strings.
 
         for entry in entries:
             if reached_last_boot_log:
@@ -205,11 +226,18 @@ class JournalCtl:
             if not self._matches_service(entry):
                 continue
 
+            # apply priority filter (delegated to helper)
+            if not self._filter_priority(entry):
+                continue
+
             svc = entry.get('SYSLOG_IDENTIFIER') or entry.get('_SYSTEMD_UNIT') or entry.get('_COMM') or entry.get('UNIT') or 'unknown'
             if svc not in service_start:
                 service_start[svc] = ts
 
-            
+            # Track first and last timestamp per service
+            if svc not in service_first:
+                service_first[svc] = ts
+            service_last[svc] = ts
 
             # elapsed: since previous displayed entry or since boot start
             if prev_ts is not None:
@@ -220,8 +248,20 @@ class JournalCtl:
             total = ts - boot_start_ts if boot_start_ts is not None else timedelta(0)
             svc_total = ts - service_start[svc]
 
+            # create status using Priority enum when possible
             pr = entry.get('PRIORITY')
-            status = priority_map.get(str(pr), str(pr)) if pr is not None else ''
+            if pr is None:
+                status = ''
+            else:
+                pr_str = str(pr)
+                try:
+                    pr_int = int(pr_str)
+                    if 0 <= pr_int <= 7:
+                        status = Priority(pr_int).name
+                    else:
+                        status = pr_str
+                except Exception:
+                    status = pr_str
 
             rows.append({
                 'ts': ts,
@@ -236,35 +276,11 @@ class JournalCtl:
 
             prev_ts = ts
 
-
-        return rows
-
-    def get_summary_data(self, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Compute first and last timestamps per service and return summary rows.
-
-        Returns list of dicts: {service, first_ts, last_ts, duration}
-        """
-        service_first: Dict[str, datetime] = {}
-        service_last: Dict[str, datetime] = {}
-
-        for entry in entries:
-            ts = self._extract_timestamp(entry)
-            if ts is None:
-                continue
-            if not self._matches_service(entry):
-                continue
-            svc = entry.get('SYSLOG_IDENTIFIER') or entry.get('_SYSTEMD_UNIT') or entry.get('_COMM') or entry.get('UNIT') or 'unknown'
-            if svc not in service_first:
-                service_first[svc] = ts
-            service_last[svc] = ts
-
-        items = []
-        for svc, first_ts in service_first.items():
-            last_ts = service_last.get(svc, first_ts)
-            items.append({'service': svc, 'first_ts': first_ts, 'last_ts': last_ts, 'duration': last_ts - first_ts})
-        # sort by first seen
-        items.sort(key=lambda it: it['first_ts'])
-        return items
+        return {
+            'rows': rows,
+            'service_first': service_first,
+            'service_last': service_last
+        }
 
     def _status_style(self, status_val: Any) -> str:
         """Return a Rich style name for a given status value."""
@@ -334,7 +350,8 @@ class JournalCtl:
 
         console.print(table)
 
-    def print_summary_table(self, summary_rows: List[Dict[str, Any]]) -> None:
+    def print_summary_table(self, collected: Dict[str, Any]) -> None:
+        """Print summary table using collected_data from collect_data."""
         console = Console(markup=False)
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Time", style="dim", width=19)
@@ -348,7 +365,15 @@ class JournalCtl:
             s = total_secs % 60
             return f"{h}:{m:02d}:{s:02d}"
 
-        for it in summary_rows:
+        service_first = collected.get('service_first', {})
+        service_last = collected.get('service_last', {})
+        items = []
+        for svc, first_ts in service_first.items():
+            last_ts = service_last.get(svc, first_ts)
+            items.append({'service': svc, 'first_ts': first_ts, 'last_ts': last_ts, 'duration': last_ts - first_ts})
+        items.sort(key=lambda it: it['first_ts'])
+
+        for it in items:
             table.add_row(it['first_ts'].strftime('%Y-%m-%d %H:%M:%S'), it['service'], fmt_hms(it['duration']))
 
         console.print(table)
@@ -373,6 +398,32 @@ class JournalCtl:
                             return True
         return False
 
+    def _filter_priority(self, entry: Dict[str, Any]) -> bool:
+        """Return True if the journal entry passes the priority filter (self.priority).
+
+        Accepts priority names (case-insensitive) or numeric values.
+        Numeric PRIORITY fields in 0..7 are mapped to Priority enum names.
+        """
+        if self.priority is None:
+            return True
+
+        pr = entry.get('PRIORITY')
+        pr_str = str(pr) if pr is not None else ''
+
+        # try to interpret numeric priority as enum name when possible
+        try:
+            pr_int = int(pr_str)
+            if 0 <= pr_int <= 7:
+                pr_name = Priority(pr_int).name.lower()
+            else:
+                pr_name = pr_str
+        except Exception:
+            pr_name = pr_str
+
+        # compare provided filter (could be name or numeric string)
+        filt = str(self.priority).lower()
+        return filt == pr_name or str(self.priority) == pr_str
+
     def _extract_timestamp(self, entry: Dict[str, Any]) -> Optional[datetime]:
         ts_fields = ['__REALTIME_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'REALTIME_TIMESTAMP']
         for fld in ts_fields:
@@ -392,12 +443,12 @@ class JournalCtl:
             click.echo("No journal entries found for the selected boot.")
             return
 
+        collected = self.collect_data(entries)
         if self.summary:
-            summary_rows = self.get_summary_data(entries)
-            self.print_summary_table(summary_rows)
+            self.print_summary_table(collected)
             return
 
-        rows = self.collect_data(entries)
+        rows = collected['rows']
         self.journal_dict = {'boot': self.boot, 'services': self.services, 'rows': rows}
         self.print_table(rows)
 
