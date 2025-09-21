@@ -311,6 +311,13 @@ class JournalCtl:
         if secs > 5:
             return 'yellow'
         return 'green'
+    
+    def _safe_log_message(self,msg: str) -> str:
+        """
+        Escapes square brackets so log messages with [ ... ] don't break markup parsers.
+        """
+        return msg.replace("[", "").replace("]", "")
+    
 
     def print_table(self, rows: List[Dict[str, Any]]) -> None:
         console = Console(markup=False)
@@ -346,14 +353,14 @@ class JournalCtl:
 
             status_text = Text(str(status_val), style=status_style)
 
-            table.add_row(r['time_str'], r['service'], r['message'], elapsed_text, status_text, svc_total_str, total_str)
-
+            table.add_row(r['time_str'], r['service'], self._safe_log_message(r['message']), elapsed_text, status_text, svc_total_str, total_str)
+        
         console.print(table)
 
     def print_summary_table(self, collected: Dict[str, Any]) -> None:
         """Print summary table using collected_data from collect_data."""
         console = Console(markup=False)
-        table = Table(show_header=True, header_style="bold magenta")
+        table = Table(show_header=True, header_style="bold")
         table.add_column("Time", style="dim", width=19)
         table.add_column("ServiceName", width=25)
         table.add_column("End Time", justify="right")
