@@ -1,0 +1,3 @@
+include README.md
+recursive-include src/journalview/groups *.yaml
+recursive-include src/journalview/documentation *.md

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "journalview"                       # unique name on PyPI
-version = "0.2.2"
+version = "0.2.3"
 description = "Python package to monitor and profile linux journal boot sequence"
 readme = "README.md"
 authors = [{ name="FroykeFroyke", email="froykefroyke@gmail.com" }]
@@ -22,3 +22,12 @@ Homepage = "https://github.com/froykefroyke/journalview"
 
 [project.scripts]
 journal-cli = "journalview.cli:main"
+ 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"journalview" = ["groups/*.yaml", "documentation/*"]
