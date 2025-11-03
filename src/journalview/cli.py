@@ -25,7 +25,7 @@ def cli(ctx) -> None:
               type=click.Choice([p.name.lower() for p in Priority], case_sensitive=False),
               default=None,
               help="Filter logs by priority level (name like 'info').")
-@click.option('--groups', '-g', multiple=True, type=click.Choice(JournalCtl.get_available_groups(), case_sensitive=False), help="Choose from defined service groups in /etc/journalview/groups/*.yaml files.")
+@click.option('--groups', '-g', multiple=True, type=click.Choice(JournalCtl.get_available_groups(), case_sensitive=False), help="Choose from defined service groups in groups/*.yaml files.")
 @click.option('--service', '-s', multiple=True, type=click.Choice(JournalCtl.get_available_services(), case_sensitive=False), default=[],
               help="Choose from a list of available services that run during boot. Default is 'all'. If you pass a plain name, the code will also match corresponding '<name>.service' systemd units.")
 def view(ctx, boot: Optional[str], summary: bool, service: Tuple[str, ...], priority: Optional[str], groups: Tuple[str, ...]) -> None:
@@ -40,7 +40,10 @@ def man(ctx):
     """Open documentation man page."""
     from markdown_viewer import MarkdownScreen
 
-    readme_path = '/etc/journalview/documentation/man.md'
+    # make documentation path relative to the real location of this file (resolve symlinks)
+    real_file = os.path.realpath(__file__)
+    base_dir = os.path.abspath(os.path.dirname(real_file))
+    readme_path = os.path.abspath(os.path.normpath(os.path.join(base_dir, 'documentation', 'man.md')))
     app = ctx.obj.get("trogon", None)
     if app is not None:
         if os.path.exists(readme_path):
@@ -49,7 +52,7 @@ def man(ctx):
         if os.path.exists(readme_path):
             os.execvp("markdown_viewer", ["markdown_viewer", readme_path])
         else:
-            print("README not found")
+            print(f"man page not found at {readme_path}")
 
 
 def main():

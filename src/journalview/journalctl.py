@@ -41,7 +41,8 @@ class Priority(IntEnum):
 	DEBUG = 7
 
 class JournalCtl:
-    groups_folder = '/etc/journalview/groups'
+    # default to the 'groups' subdirectory next to this file (works when installed or in-source)
+    groups_folder = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'groups'))
 
     def __init__(self, trogon:bool = False, boot: Optional[str] = None, services: Tuple[str, ...] = [], summary: bool = False, priority: Optional[str] = None, groups: Tuple[str, ...] = ()) -> None:
         """Initialize JournalCtl for a specific boot and set of services."""
@@ -55,7 +56,7 @@ class JournalCtl:
         self.trogon = trogon
 
     def _load_groups(self) -> set:
-        """Load service groups from /etc/journalview/groups/*.yaml files and return services for selected groups."""
+        """Load service groups from groups/*.yaml files and return services for selected groups."""
         all_groups = {}
         
         if not os.path.exists(self.groups_folder):
@@ -209,7 +210,7 @@ class JournalCtl:
 
     @staticmethod
     def get_available_groups() -> List[str]:
-        """Discover available group names from /etc/journalview/groups/*.yaml files."""
+        """Discover available group names from groups/*.yaml files."""
         import glob
         all_groups = {}
         if not os.path.exists(JournalCtl.groups_folder):
