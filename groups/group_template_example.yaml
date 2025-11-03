@@ -1,0 +1,13 @@
+groups:
+  network:
+    - systemd-networkd
+    - NetworkManager
+    - dhcpcd
+  system:
+    - systemd
+    - systemd-logind
+    - systemd-udevd
+  boot:
+    - systemd-modules-load
+    - systemd-sysctl
+    - systemd-tmpfiles-setup
