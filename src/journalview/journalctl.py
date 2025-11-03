@@ -3,12 +3,27 @@ import click
 import subprocess
 import sys
 import json
+import yaml
+import glob
+import os
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from rich.table import Table
 from rich.console import Console
 from rich.text import Text
 from enum import IntEnum
+
+
+@click.pass_context
+def app_print(ctx, msg:str, prompt:bool = True):
+    prompt_str:str = ''
+    log_widget = ctx.obj.get('log_widget', None)
+    if log_widget:
+        if prompt:
+            prompt_str = f''
+        log_widget.write(f'{prompt_str}{msg}')
+    else:
+        print(msg)
 
 class Priority(IntEnum):
 	"""Standard syslog/journal priorities (numeric values)."""
@@ -26,14 +41,38 @@ class Priority(IntEnum):
 	DEBUG = 7
 
 class JournalCtl:
+    groups_folder = '/etc/journalview/groups'
 
-    def __init__(self, boot: Optional[str], services: Tuple[str, ...], summary: bool = False, priority: Optional[str] = None) -> None:
+    def __init__(self, trogon:bool = False, boot: Optional[str] = None, services: Tuple[str, ...] = [], summary: bool = False, priority: Optional[str] = None, groups: Tuple[str, ...] = ()) -> None:
         """Initialize JournalCtl for a specific boot and set of services."""
-        self.boot: str = boot if boot is not None else '0'
-        self.services: Tuple[str, ...] = services
+        self.boot: str = boot if boot else '0'
+        self.groups: Tuple[str, ...] = groups
+        self.services: set = set(services)
+        self.services.update(self._load_groups())
         self.journal_dict: Dict[str, Any] = {}
         self.summary: bool = summary
         self.priority: Optional[str] = priority
+        self.trogon = trogon
+
+    def _load_groups(self) -> set:
+        """Load service groups from /etc/journalview/groups/*.yaml files and return services for selected groups."""
+        all_groups = {}
+        
+        if not os.path.exists(self.groups_folder):
+            return set()
+        for yaml_file in glob.glob(os.path.join(self.groups_folder, '*.yaml')):
+            try:
+                with open(yaml_file, 'r') as f:
+                    data = yaml.safe_load(f)
+                    if 'groups' in data:
+                        all_groups.update(data['groups'])
+            except Exception:
+                continue
+        selected_services = set()
+        for group in self.groups:
+            if group in all_groups:
+                selected_services.update(all_groups[group])
+        return selected_services
 
     @staticmethod
     def get_available_boots() -> int:
@@ -111,6 +150,7 @@ class JournalCtl:
         """Discover available service identifiers from the journal for the given boot.
 
         Returns a sorted list of unique names (SYSLOG_IDENTIFIER, _SYSTEMD_UNIT, _COMM, UNIT).
+        Names ending with '.service' are normalized to remove the suffix for uniqueness.
         On Windows or when journalctl is not available, reads from tests/journal_logs/journal.json.
         """
         services: set = set()
@@ -130,9 +170,12 @@ class JournalCtl:
                         for fld in ('SYSLOG_IDENTIFIER', '_SYSTEMD_UNIT', '_COMM', 'UNIT'):
                             val = entry.get(fld)
                             if val:
+                                # Normalize by removing .service suffix
+                                if val.endswith('.service'):
+                                    val = val[:-8]
                                 services.add(val)
                 if services:
-                    return sorted(services)
+                    return ['all'] + sorted(services)
                 return ['all']
             except FileNotFoundError:
                 return ['all']
@@ -152,6 +195,9 @@ class JournalCtl:
                 for fld in ('SYSLOG_IDENTIFIER', '_SYSTEMD_UNIT', '_COMM', 'UNIT'):
                     val = entry.get(fld)
                     if val:
+                        # Normalize by removing .service suffix
+                        if val.endswith('.service'):
+                            val = val[:-8]
                         services.add(val)
             if services:
                 return ['all'] + sorted(services)
@@ -160,6 +206,23 @@ class JournalCtl:
             return ['all']
         except subprocess.CalledProcessError:
             return ['all']
+
+    @staticmethod
+    def get_available_groups() -> List[str]:
+        """Discover available group names from /etc/journalview/groups/*.yaml files."""
+        import glob
+        all_groups = {}
+        if not os.path.exists(JournalCtl.groups_folder):
+            return []
+        for yaml_file in glob.glob(os.path.join(JournalCtl.groups_folder, '*.yaml')):
+            try:
+                with open(yaml_file, 'r') as f:
+                    data = yaml.safe_load(f)
+                    if 'groups' in data:
+                        all_groups.update(data['groups'])
+            except Exception:
+                continue
+        return sorted(all_groups.keys())
 
     def _decode_journal_message(self, entry):
         """
@@ -320,7 +383,11 @@ class JournalCtl:
     
 
     def print_table(self, rows: List[Dict[str, Any]]) -> None:
-        console = Console(markup=False)
+        if self.trogon:
+            console = Console(markup=False, record=True)
+        else:
+            console = Console(markup=False)
+
         table = Table(show_header=True, header_style="bold")
         table.add_column("Time", style="dim", width=19)
         table.add_column("ServiceName", width=25)
@@ -356,10 +423,16 @@ class JournalCtl:
             table.add_row(r['time_str'], r['service'], self._safe_log_message(r['message']), elapsed_text, status_text, svc_total_str, total_str)
         
         console.print(table)
+        if self.trogon:
+            app_print(msg=console.export_text())
 
     def print_summary_table(self, collected: Dict[str, Any]) -> None:
         """Print summary table using collected_data from collect_data."""
-        console = Console(markup=False)
+        if self.trogon:
+            console = Console(markup=False, record=True)
+        else:
+            console = Console(markup=False)
+
         table = Table(show_header=True, header_style="bold")
         table.add_column("Time", style="dim", width=19)
         table.add_column("ServiceName", width=25)
@@ -384,6 +457,8 @@ class JournalCtl:
             table.add_row(it['first_ts'].strftime('%Y-%m-%d %H:%M:%S'), it['service'], fmt_hms(it['duration']))
 
         console.print(table)
+        if self.trogon:
+            app_print(msg=console.export_text())
 
     # helper wrappers so internal helpers can be reused by both data and printing
     def _matches_service(self, entry: Dict[str, Any]) -> bool:
@@ -456,6 +531,6 @@ class JournalCtl:
             return
 
         rows = collected['rows']
-        self.journal_dict = {'boot': self.boot, 'services': self.services, 'rows': rows}
+        self.journal_dict = {'boot': self.boot, 'services': list(self.services), 'rows': rows}
         self.print_table(rows)
 

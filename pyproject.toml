@@ -12,7 +12,8 @@ license = {text = "MIT"}
 dependencies = [
     "rich",
     "trogon",
-    "click"
+    "click",
+    "textual"
 ]
 requires-python = ">=3.9"
 

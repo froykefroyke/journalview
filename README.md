@@ -1,7 +1,7 @@
 journalview
 =========
 
-A small CLI utility to inspect systemd journal boot logs (journalctl) and profile service startup times.
+A CLI utility to inspect systemd journal boot logs (journalctl) and profile service startup times.
 
 What it does
 ------------
@@ -42,20 +42,37 @@ pip install click rich
 
 Usage
 -----
-Run the CLI from the package root, for example:
+Run the CLI, for example:
 
-python -m journalview.journalview view --service all
-python -m journalview.journalview view -s sshd -b 0
-python -m journalview.journalview view -s sshd --summary
+journalview view --service all
+journalview view -s sshd -b 0
+journalview view -s sshd --summary
+journalview view --groups linux --priority warning
 
 Options
 -------
 - --service / -s : one or more service identifiers to filter (default: all)
+- --groups / -g  : one or more predefined service groups to filter (from /etc/journalview/groups/*.yaml)
 - --boot / -b    : boot index (0..N) to inspect
 - --summary / -S : show per-service summary instead of the detailed table
+- --priority / -p: filter by log priority (emerg, alert, crit, err, warning, notice, info, debug)
 
-Notes
------
+Service Groups
+--------------
+You can define service groups in YAML files under `/etc/journalview/groups/`. Each group contains a list of services. For example:
+
+```yaml
+groups:
+  linux:
+    - systemd
+    - sshd
+    - auditd
+  gaia-os:
+    - cpboot
+    - zzzboot_profile
+```
+
+This allows filtering logs by logical groups instead of individual services.
 - The tool expects journalctl JSON output format. The test-file used for Windows should contain one JSON object per line.
 - Matching of services is exact; pass the systemd unit name (or the syslog identifier). The code also attempts to match the provided name with a ".service" suffix.
 

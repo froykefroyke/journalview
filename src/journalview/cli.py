@@ -6,8 +6,7 @@ import click
 from typing import Optional, Tuple
 from journalview.journalctl import JournalCtl, Priority
 
-
-@tui()
+@tui(trogon_ready=True)
 @click.group()
 @click.pass_context
 def cli(ctx) -> None:
@@ -17,6 +16,7 @@ def cli(ctx) -> None:
 
 
 @cli.command()
+@click.pass_context 
 @click.option('--boot', '-b', type=click.Choice([str(i) for i in range(JournalCtl.get_available_boots())], case_sensitive=False),
               help="Choose the boot number from the list of available boots.")
 @click.option('--summary', '-S', is_flag=True, default=False,
@@ -25,13 +25,31 @@ def cli(ctx) -> None:
               type=click.Choice([p.name.lower() for p in Priority], case_sensitive=False),
               default=None,
               help="Filter logs by priority level (name like 'info').")
+@click.option('--groups', '-g', multiple=True, type=click.Choice(JournalCtl.get_available_groups(), case_sensitive=False), help="Choose from defined service groups in /etc/journalview/groups/*.yaml files.")
 @click.option('--service', '-s', multiple=True, type=click.Choice(JournalCtl.get_available_services(), case_sensitive=False), default=[],
               help="Choose from a list of available services that run during boot. Default is 'all'. If you pass a plain name, the code will also match corresponding '<name>.service' systemd units.")
-def view(boot: Optional[str], summary: bool, service: Tuple[str, ...], priority: Optional[str]) -> None:
+def view(ctx, boot: Optional[str], summary: bool, service: Tuple[str, ...], priority: Optional[str], groups: Tuple[str, ...]) -> None:
     """View journal logs for the specified services and boot number."""
-    jt = JournalCtl(boot, service, summary, priority)
+    jt = JournalCtl(ctx.obj.get("trogon", None) != None, boot, service, summary, priority, groups)
     jt.view()
 
+
+@cli.command(name='man', help='Open documentation man page in markdown viewer.')
+@click.pass_context
+def man(ctx):
+    """Open documentation man page."""
+    from markdown_viewer import MarkdownScreen
+
+    readme_path = '/etc/journalview/documentation/man.md'
+    app = ctx.obj.get("trogon", None)
+    if app is not None:
+        if os.path.exists(readme_path):
+            app.call_from_thread(app.push_screen, MarkdownScreen(markdown_file=readme_path))
+    else:
+        if os.path.exists(readme_path):
+            os.execvp("markdown_viewer", ["markdown_viewer", readme_path])
+        else:
+            print("README not found")
 
 
 def main():
